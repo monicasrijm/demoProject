@@ -1,25 +1,82 @@
-from fastapi import FastAPI  # class-FastAPI
+import json
+from fastapi import FastAPI, Depends, Request, Response
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+from database.configurations import init_db, db_session
+from database.schema import ItemSchema
+from database.models import Item
+# configure fastapi
+app = FastAPI()
 
-app = FastAPI()  # object
+# configure static route
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# CRUD APIs
-# C - Create(Post)
-# R - Read(Get)
-# U - Update(Put/patch)
-# D - Delete(Delete)
-# fastapi run api in parallel way unlike flask and django
+# configure template
+templates = Jinja2Templates(directory="templates")
 
-
-@app.get("/")
-async def root():  # async-run function parallely
-    return "This is home page"
+# Create SQLite3 database and table on app server startup
 
 
-@app.get("/sub")
-async def subPage():
-    return "This is sub home page"
+@app.on_event("startup")
+def on_startup():
+    init_db()
 
-"""
-ORM-Object Relationship Manager - used to connect databases ,Eg : sqlalchemy
-"""
-# https://www.amazon.in/?&tag=googhydrabk1-21&ref=pd_sl_7hz2t19t5c_e&adgrpid=155259815513&hvpone=&hvptwo=&hvadid=674842289437&hvpos=&hvnetw=g&hvrand=5520046121830359561&hvqmt=e&hvdev=c&hvdvcmdl=&hvlocint=&hvlocphy=9148884&hvtargid=kwd-10573980&hydadcr=14453_2316415&gad_source=1
+
+#     Create route to render HTML template
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/api/todo")
+def getItems(session: Session = Depends(db_session)):
+    items = session.query(Item).all()
+    return items
+
+
+@app.post("/api/todo")
+def addItem(item: ItemSchema, session: Session = Depends(db_session)):
+    todoitem = Item(task=item.task)
+    session.add(todoitem)
+    session.commit()
+    session.refresh(todoitem)
+    return todoitem
+
+
+@app.patch("/api/todo/{id}")
+def update_item(id: int, item: ItemSchema,
+                session: Session = Depends(db_session)):
+    todoitem = session.query(Item).get(id)
+    if todoitem:
+        todoitem.task = item.task
+        session.commit()
+        session.close()
+        response = json.dumps({"msg": "Item has been updated."})
+        return Response(
+            content=response, media_type='application/json', status_code=200
+        )
+    else:
+        response = json.dumps({"msg": "Item not found"})
+        return Response(
+            content=response, media_type='application/json', status_code=404
+        )
+
+
+@app.delete("/api/todo/{id}")
+def delete_item(id: int, session: Session = Depends(db_session)):
+    todoitem = session.query(Item).get(id)
+    if todoitem:
+        session.delete(todoitem)
+        session.commit()
+        session.close()
+        response = json.dumps({"msg": "Item has been deleted."})
+        return Response(
+            content=response, media_type='application/json', status_code=200
+        )
+    else:
+        response = json.dumps({"msg": "Item not found"})
+        return Response(
+            content=response, media_type='application/json', status_code=404
+        )
